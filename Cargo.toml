@@ -1,0 +1,21 @@
+[package]
+name = "file_upload_exporter"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1"
+prometheus-client = "0.22"
+regex = "1.11"
+tokio = { version = "1.42", features = ["rt-multi-thread", "macros", "parking_lot"] }
+tracing = "0.1"
+tracing-error = { version = "^0.2", features = ["traced-error"] }
+tracing-futures = "0.2"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json", "local-time"] }
+
+[profile.release]
+lto = true
+incremental = true
+codegen-units = 1
+strip = true
+panic = "abort"
