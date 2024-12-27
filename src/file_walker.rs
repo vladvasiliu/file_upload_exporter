@@ -5,6 +5,9 @@ use std::fs;
 use std::fs::DirEntry;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
+use regex::bytes::Regex;
+use serde::{Deserialize, Deserializer};
+use serde::de::Error;
 use tracing::warn;
 
 pub struct DirWalker {
@@ -21,6 +24,7 @@ impl DirWalker {
             &self.search_path.path,
             file_callback,
             self.search_path.recursive,
+            &self.search_path.file_regex
         )
     }
 
@@ -29,6 +33,7 @@ impl DirWalker {
         dir: &Path,
         file_callback: fn(&DirEntry) -> Result<SystemTime>,
         recursive: bool,
+        regex: &Regex
     ) -> Result<WalkResult> {
         let mut max_time = SystemTime::UNIX_EPOCH;
         let mut files_visited = 0_u128;
@@ -46,14 +51,13 @@ impl DirWalker {
                         };
                         let path = entry.path();
                         if path.is_dir() && recursive {
-                            if let Ok(wr) = Self::walk_dir(&path, file_callback, true) {
+                            if let Ok(wr) = Self::walk_dir(&path, file_callback, true, regex) {
                                 max_time = max(max_time, wr.max_time);
                                 files_visited += wr.files_visited;
                             }
-                        } else if path.is_file() {
+                        } else if path.is_file() && regex.is_match(path.as_os_str().as_encoded_bytes()) {
                             match file_callback(&entry) {
                                 Ok(st) => {
-                                    // println!("{}: {:?}", path.display(), st)
                                     max_time = max(max_time, st);
                                 }
                                 Err(err) => warn!("{}", err),
@@ -82,18 +86,27 @@ impl DirWalker {
     }
 }
 
-pub fn file_callback(d: &DirEntry) -> anyhow::Result<SystemTime> {
-    let metadata = d.metadata().context("Failed to read metadata")?;
-    metadata.modified().context("Failed to read modified time")
+pub fn file_callback(d: &DirEntry) -> Result<SystemTime> {
+    let metadata = d.metadata().context("failed to read metadata")?;
+    metadata.modified().context("failed to read modified time")
 }
 
 /// A path to monitor, with a name and a file regex to match
+#[derive(Debug, Deserialize)]
 pub struct SearchPath {
-    pub(crate) name: String,
-    pub(crate) path: PathBuf,
-    pub(crate) recursive: bool,
-    pub(crate) pattern: String,
-    pub(crate) labels: HashMap<String, String>,
+    name: String,
+    path: PathBuf,
+    recursive: bool,
+    #[serde(deserialize_with = "deserialize_regex")]
+    file_regex: Regex,
+    labels: HashMap<String, String>,
+}
+
+fn deserialize_regex<'de, D>(deserializer: D) -> std::result::Result<Regex, D::Error>
+where D: Deserializer<'de> {
+    let pattern = String::deserialize(deserializer)?;
+    let regex = Regex::new(&pattern).map_err(|e| D::Error::custom(format!("invalid file pattern: {}", e)))?;
+    Ok(regex)
 }
 
 pub struct WalkResult {
