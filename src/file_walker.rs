@@ -1,31 +1,28 @@
 use anyhow::{anyhow, Context, Result};
+use regex::bytes::Regex;
+use serde::de::Error;
+use serde::{Deserialize, Deserializer};
 use std::cmp::max;
 use std::collections::HashMap;
 use std::fs;
 use std::fs::DirEntry;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
-use regex::bytes::Regex;
-use serde::{Deserialize, Deserializer};
-use serde::de::Error;
 use tracing::warn;
 
+#[derive(Debug, Deserialize)]
 pub struct DirWalker {
-    search_path: SearchPath,
+    pub name: String,
+    path: PathBuf,
+    recursive: bool,
+    #[serde(deserialize_with = "deserialize_regex")]
+    file_regex: Regex,
+    labels: HashMap<String, String>,
 }
 
 impl DirWalker {
-    pub fn new(search_path: SearchPath) -> Self {
-        Self { search_path }
-    }
-
     pub fn walk(&self) -> Result<WalkResult> {
-        Self::walk_dir(
-            &self.search_path.path,
-            file_callback,
-            self.search_path.recursive,
-            &self.search_path.file_regex
-        )
+        Self::walk_dir(&self.path, file_callback, self.recursive, &self.file_regex)
     }
 
     /// Walk a dir and return the time of latest modification
@@ -33,10 +30,10 @@ impl DirWalker {
         dir: &Path,
         file_callback: fn(&DirEntry) -> Result<SystemTime>,
         recursive: bool,
-        regex: &Regex
+        regex: &Regex,
     ) -> Result<WalkResult> {
         let mut max_time = SystemTime::UNIX_EPOCH;
-        let mut files_visited = 0_u128;
+        let mut files_visited = 0_u64;
 
         if dir.is_dir() {
             match fs::read_dir(dir) {
@@ -55,7 +52,9 @@ impl DirWalker {
                                 max_time = max(max_time, wr.max_time);
                                 files_visited += wr.files_visited;
                             }
-                        } else if path.is_file() && regex.is_match(path.as_os_str().as_encoded_bytes()) {
+                        } else if path.is_file()
+                            && regex.is_match(path.as_os_str().as_encoded_bytes())
+                        {
                             match file_callback(&entry) {
                                 Ok(st) => {
                                     max_time = max(max_time, st);
@@ -91,25 +90,17 @@ pub fn file_callback(d: &DirEntry) -> Result<SystemTime> {
     metadata.modified().context("failed to read modified time")
 }
 
-/// A path to monitor, with a name and a file regex to match
-#[derive(Debug, Deserialize)]
-pub struct SearchPath {
-    name: String,
-    path: PathBuf,
-    recursive: bool,
-    #[serde(deserialize_with = "deserialize_regex")]
-    file_regex: Regex,
-    labels: HashMap<String, String>,
-}
-
 fn deserialize_regex<'de, D>(deserializer: D) -> std::result::Result<Regex, D::Error>
-where D: Deserializer<'de> {
+where
+    D: Deserializer<'de>,
+{
     let pattern = String::deserialize(deserializer)?;
-    let regex = Regex::new(&pattern).map_err(|e| D::Error::custom(format!("invalid file pattern: {}", e)))?;
+    let regex = Regex::new(&pattern)
+        .map_err(|e| D::Error::custom(format!("invalid file pattern: {}", e)))?;
     Ok(regex)
 }
 
 pub struct WalkResult {
     pub(crate) max_time: SystemTime,
-    pub(crate) files_visited: u128,
+    pub(crate) files_visited: u64,
 }

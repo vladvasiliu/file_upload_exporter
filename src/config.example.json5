@@ -1,0 +1,12 @@
+{
+  "listen_port": 4321,
+  "file_watchers": [
+    {
+      name: "some watcher",
+      path: "/home/vlad/tmp/file_upload_test",
+      recursive: true,
+      file_regex: ".*\.txt",
+      labels: {}
+    }
+  ]
+}
