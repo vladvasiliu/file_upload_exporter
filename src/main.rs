@@ -19,7 +19,7 @@ async fn main() {
         .with(ErrorLayer::default())
         .init();
 
-    let mut settings = match Settings::load("config.json5").context("Loading settings") {
+    let settings = match Settings::load("config.json5").context("Loading settings") {
         Ok(settings) => settings,
         Err(err) => {
             error!(errror.backtrace = %err.backtrace(), error.message = format!("{:#}", err), error.root_cause = err.root_cause(), "Failed to load settings");

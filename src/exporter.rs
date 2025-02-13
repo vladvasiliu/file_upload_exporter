@@ -3,15 +3,13 @@ use prometheus_client::encoding::{EncodeLabelSet, EncodeLabelValue};
 use prometheus_client::metrics::counter::Counter;
 use prometheus_client::metrics::family::Family;
 use prometheus_client::metrics::gauge::Gauge;
-use prometheus_client::registry::Registry;
+use prometheus_client::registry::{Registry, Unit};
 use std::sync::atomic::AtomicU64;
-use std::time::UNIX_EPOCH;
+use std::time::{Instant, UNIX_EPOCH};
 
 pub struct Exporter {
     registry: Registry,
     file_walkers: Vec<DirWalker>,
-    collector_status_counter: Family<StatusLabels, Counter>,
-    collector_duration_counter: Family<DurationLabels, Counter>,
 }
 
 impl Exporter {
@@ -35,8 +33,6 @@ impl Exporter {
         Self {
             file_walkers,
             registry,
-            collector_duration_counter,
-            collector_status_counter,
         }
     }
 }
@@ -67,14 +63,26 @@ impl FileStatusCollector {
             "Whether the watcher succeeded",
             watcher_success.clone(),
         );
+        let watcher_duration = Family::<ResultLabels, Gauge<u64, AtomicU64>>::default();
+        registry.register_with_unit(
+            "watcher_duration",
+            "How long the watcher took, in seconds",
+            Unit::Seconds,
+            watcher_duration.clone(),
+        );
 
         for walker in &self.file_walkers {
             let result_labels = &ResultLabels {
                 name: walker.name.clone(),
             };
 
-            if let Ok(walk_result) = walker.walk() {
-                watcher_success.get_or_create(result_labels).set(1);
+            let walk_start = Instant::now();
+            let walk_result = walker.walk();
+            let walk_duration = walk_start.elapsed();
+            let mut success = 0;
+
+            if let Ok(walk_result) = walk_result {
+                success = 1;
                 watcher_file_count
                     .get_or_create(result_labels)
                     .set(walk_result.files_visited);
@@ -85,9 +93,11 @@ impl FileStatusCollector {
                         .unwrap()
                         .as_secs(),
                 );
-            } else {
-                watcher_success.get_or_create(result_labels).set(0);
             }
+            watcher_success.get_or_create(result_labels).set(success);
+            watcher_duration
+                .get_or_create(result_labels)
+                .set(walk_duration.as_secs());
         }
 
         registry
