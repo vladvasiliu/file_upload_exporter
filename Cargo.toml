@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1"
+axum = { "version" = "0.8", default-features = false, features = ["http1", "matched-path", "tokio", "tracing"] }
 config = { version = "0.15", default-features = false, features = ["json5"] }
 prometheus-client = "0.23"
 regex = "1.11"

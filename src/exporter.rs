@@ -35,14 +35,11 @@ impl Exporter {
             registry,
         }
     }
-}
 
-pub struct FileStatusCollector {
-    pub file_walkers: Vec<DirWalker>,
-    // collector_result_value: Family<ResultLabels, Gauge>,
-}
+    pub fn registry(&self) -> &Registry {
+        &self.registry
+    }
 
-impl FileStatusCollector {
     pub fn collect(&self) -> Registry {
         let mut registry = <Registry>::default();
         let watcher_upload_time = Family::<ResultLabels, Gauge<u64, AtomicU64>>::default();

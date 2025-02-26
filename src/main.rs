@@ -1,12 +1,21 @@
 mod exporter;
 mod file_walker;
 
-use crate::exporter::FileStatusCollector;
+use crate::exporter::Exporter;
 use crate::file_walker::DirWalker;
 use anyhow::{Context, Result};
-use prometheus_client::encoding::text::encode_registry;
+use axum::body::Body;
+use axum::extract::State;
+use axum::http::{Response, StatusCode};
+use axum::response::IntoResponse;
+use axum::routing::get;
+use axum::Router;
+use prometheus_client::encoding::text::{encode, encode_registry};
 use serde::Deserialize;
+use std::net::SocketAddr;
 use std::process::exit;
+use std::sync::Arc;
+use tokio::sync::RwLock;
 use tracing::{error, info, instrument, warn};
 use tracing_error::ErrorLayer;
 use tracing_subscriber::prelude::*;
@@ -27,14 +36,34 @@ async fn main() {
         }
     };
 
-    let file_status_collector = FileStatusCollector {
-        file_walkers: settings.file_watchers,
+    let file_status_collector = Arc::new(RwLock::new(Exporter::new(settings.file_watchers)));
+
+    let router = Router::new()
+        .route("/metrics", get(metrics_handler))
+        .with_state(file_status_collector);
+    let listener = match tokio::net::TcpListener::bind(("", settings.listen_port)).await {
+        Ok(l) => {
+            info!("Listening on {}", l.local_addr().unwrap());
+            l
+        }
+        Err(err) => {
+            error!(error.message = %err, "Failed to bind listener");
+            exit(1)
+        }
     };
 
-    let registry = file_status_collector.collect();
-    let mut output = String::new();
-    encode_registry(&mut output, &registry);
-    println!("{}", &output);
+    match axum::serve(
+        listener,
+        router.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .await
+    {
+        Ok(_) => info!("Shutting down"),
+        Err(err) => {
+            error!(error.message = %err, "Server failed");
+            exit(1)
+        }
+    }
 
     // let join = task::spawn_blocking(|| {
     //     let walker = DirWalker::new(search_path);
@@ -57,6 +86,33 @@ async fn main() {
     // });
 
     // println!("{:?}", join.await);
+}
+
+async fn metrics_handler(State(exporter): State<Arc<RwLock<Exporter>>>) -> impl IntoResponse {
+    let state = exporter.write().await;
+    let mut buffer = String::new();
+
+    let local_registry = state.collect();
+
+    match encode_registry(&mut buffer, state.registry())
+        .and_then(|()| encode_registry(&mut buffer, &local_registry))
+    {
+        Ok(()) => Response::builder()
+            .status(StatusCode::OK)
+            .header(
+                "CONTENT_TYPE",
+                "application/openmetrics-text; version=1.0.0; charset=utf-8",
+            )
+            .body(Body::from(buffer))
+            .unwrap(),
+        Err(err) => {
+            warn!("Failed to encode registry: {}", err);
+            Response::builder()
+                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                .body(Body::from(err.to_string()))
+                .unwrap()
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
