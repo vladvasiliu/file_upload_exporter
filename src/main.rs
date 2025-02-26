@@ -15,7 +15,7 @@ use serde::Deserialize;
 use std::net::SocketAddr;
 use std::process::exit;
 use std::sync::Arc;
-use tokio::sync::RwLock;
+use tokio::task;
 use tracing::{error, info, instrument, warn};
 use tracing_error::ErrorLayer;
 use tracing_subscriber::prelude::*;
@@ -36,7 +36,7 @@ async fn main() {
         }
     };
 
-    let file_status_collector = Arc::new(RwLock::new(Exporter::new(settings.file_watchers)));
+    let file_status_collector = Arc::new(Exporter::new(settings.file_watchers));
 
     let router = Router::new()
         .route("/metrics", get(metrics_handler))
@@ -64,37 +64,23 @@ async fn main() {
             exit(1)
         }
     }
-
-    // let join = task::spawn_blocking(|| {
-    //     let walker = DirWalker::new(search_path);
-    //
-    //     match walker.walk() {
-    //         Err(e) => warn!("{}", e),
-    //         Ok(walk_result) => {
-    //             let max_time = walk_result
-    //                 .max_time
-    //                 .duration_since(SystemTime::UNIX_EPOCH)
-    //                 .unwrap()
-    //                 .as_secs();
-    //             info!(
-    //                 max_time = max_time,
-    //                 files_visited = walk_result.files_visited,
-    //                 "Done"
-    //             );
-    //         }
-    //     }
-    // });
-
-    // println!("{:?}", join.await);
 }
 
-async fn metrics_handler(State(exporter): State<Arc<RwLock<Exporter>>>) -> impl IntoResponse {
-    let state = exporter.write().await;
+async fn metrics_handler(State(exporter): State<Arc<Exporter>>) -> impl IntoResponse {
     let mut buffer = String::new();
 
-    let local_registry = state.collect();
+    let local_registry = match task::spawn_blocking(move || exporter.collect()).await {
+        Ok(lr) => lr,
+        Err(err) => {
+            warn!(error.message = %err, "Failed to collect latest update");
+            return Response::builder()
+                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                .body(Body::from(err.to_string()))
+                .unwrap();
+        }
+    };
 
-    match encode_registry(&mut buffer, state.registry())
+    match encode_registry(&mut buffer, &local_registry)
         .and_then(|()| encode_registry(&mut buffer, &local_registry))
     {
         Ok(()) => Response::builder()

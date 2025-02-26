@@ -6,9 +6,10 @@ use prometheus_client::metrics::gauge::Gauge;
 use prometheus_client::registry::{Registry, Unit};
 use std::sync::atomic::AtomicU64;
 use std::time::{Instant, UNIX_EPOCH};
+use tokio::sync::RwLock;
 
 pub struct Exporter {
-    registry: Registry,
+    registry: RwLock<Registry>,
     file_walkers: Vec<DirWalker>,
 }
 
@@ -32,12 +33,8 @@ impl Exporter {
 
         Self {
             file_walkers,
-            registry,
+            registry: RwLock::new(registry),
         }
-    }
-
-    pub fn registry(&self) -> &Registry {
-        &self.registry
     }
 
     pub fn collect(&self) -> Registry {
