@@ -10,7 +10,7 @@ config = { version = "0.15", default-features = false, features = ["json5"] }
 prometheus-client = "0.23"
 regex = "1.11"
 serde = { version = "1", features = ["derive"] }
-tokio = { version = "1.42", features = ["rt-multi-thread", "macros", "parking_lot"] }
+tokio = { version = "1.43", features = ["rt-multi-thread", "macros", "parking_lot"] }
 tracing = "0.1"
 tracing-error = { version = "^0.2", features = ["traced-error"] }
 #tracing-futures = "0.2"
